@@ -1,10 +1,3 @@
-import rasterio
-import numpy as np
-import os, fnmatch
-import gc
-import re
-
-
 def get_objs(pth):
     return fnmatch.filter(os.listdir(pth),'*.tif')
 
@@ -100,10 +93,43 @@ def merge(stackA,stackB,position,buf):
             col_max = max(col_A, col_B)
 
             if position == 1:
-                # for stackA
                 # pad the right first
-                if col_A != col_B:
-                    for i in range(bands):
+                # then pad the bottom
+                if col_A >= col_B:
+                  # for stackA
+                  ## no need to pad the right
+                  ## pad the bottom
+                  img_patchBOT = np.zeros(row_B-buf,col_A)
+                  # for stackB
+                  ## pad the right
+                  ## pad the top
+                  img_patchRGT = np.zeros(row_B,col_A-col_B)
+                  img_patchTOP = np.zeros(row_A-buf,col_A)
+
+                  for i in range(bands):
+                    stackA[i] = np.vstack((stackA[i],img_patchBOT))
+                    stackB[i] = np.hstack((stackB[i],img_patchRGT))
+                    stackB[i] = np.vstack((img_patchTOP,stackB[i]))
+                else:
+                  # for stackA
+                  ## pad the right
+                  ## pad the bottom
+                  img_patchRGT = np.zeros(row_A,col_B-col_A)
+                  img_patchBOT = np.zeros(row_B-buf,col_B)
+                  # for stackB
+                  ## no need to pad the right
+                  ## pad the top
+                  img_patchTOP = np.zeros(row_A-buf,col_B)
+
+                  for i in range(bands):
+                    stackA[i] = np.hstack((stackA[i], img_patchRGT))
+                    stackA[i] = np.vstack((stackA[i],img_patchBOT))
+                    stackB[i] = np.vstack((img_patchTOP,stackB[i]))
+                  
+
+            elif position == 2:
+              # 
+
 
 
     else:
