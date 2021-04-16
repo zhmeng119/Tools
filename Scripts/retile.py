@@ -96,35 +96,42 @@ def merge(stackA,stackB,position,buf):
                 # pad the right first
                 # then pad the bottom
                 if col_A >= col_B:
-                  # for stackA
-                  ## no need to pad the right
-                  ## pad the bottom
-                  img_patchBOT = np.zeros(row_B-buf,col_A)
-                  # for stackB
-                  ## pad the right
-                  ## pad the top
-                  img_patchRGT = np.zeros(row_B,col_A-col_B)
-                  img_patchTOP = np.zeros(row_A-buf,col_A)
+                  if row_B-buf < 1 or row_A-buf < 1:
+                    raise Exception("######Error!######")
+                  else:
+                    # for stackA
+                    ## no need to pad the right
+                    ## pad the bottom
+                    img_patchBOT = np.zeros(row_B-buf,col_A)
+                    # for stackB
+                    ## pad the right
+                    ## pad the top
+                    img_patchRGT = np.zeros(row_B,col_A-col_B)
+                    img_patchTOP = np.zeros(row_A-buf,col_A)
 
-                  for i in range(bands):
-                    stackA[i] = np.vstack((stackA[i],img_patchBOT))
-                    stackB[i] = np.hstack((stackB[i],img_patchRGT))
-                    stackB[i] = np.vstack((img_patchTOP,stackB[i]))
+                    for i in range(bands):
+                      stackA[i] = np.vstack((stackA[i],img_patchBOT))
+                      stackB[i] = np.hstack((stackB[i],img_patchRGT))
+                      stackB[i] = np.vstack((img_patchTOP,stackB[i]))
+                  
                 else:
-                  # for stackA
-                  ## pad the right
-                  ## pad the bottom
-                  img_patchRGT = np.zeros(row_A,col_B-col_A)
-                  img_patchBOT = np.zeros(row_B-buf,col_B)
-                  # for stackB
-                  ## no need to pad the right
-                  ## pad the top
-                  img_patchTOP = np.zeros(row_A-buf,col_B)
+                  if row_B-buf < 1 or row_A-buf < 1:
+                    raise Exception("######Error!######")
+                  else:
+                    # for stackA
+                    ## pad the right
+                    ## pad the bottom
+                    img_patchRGT = np.zeros(row_A,col_B-col_A)
+                    img_patchBOT = np.zeros(row_B-buf,col_B)
+                    # for stackB
+                    ## no need to pad the right
+                    ## pad the top
+                    img_patchTOP = np.zeros(row_A-buf,col_B)
 
-                  for i in range(bands):
-                    stackA[i] = np.hstack((stackA[i], img_patchRGT))
-                    stackA[i] = np.vstack((stackA[i],img_patchBOT))
-                    stackB[i] = np.vstack((img_patchTOP,stackB[i]))
+                    for i in range(bands):
+                      stackA[i] = np.hstack((stackA[i], img_patchRGT))
+                      stackA[i] = np.vstack((stackA[i],img_patchBOT))
+                      stackB[i] = np.vstack((img_patchTOP,stackB[i]))
                   
 
             elif position == 2:
@@ -170,9 +177,6 @@ def merge(stackA,stackB,position,buf):
             result = np.reshape(result,(bands, row, 2*col-buf))
 
     return result
-
-
-
 
 
 
