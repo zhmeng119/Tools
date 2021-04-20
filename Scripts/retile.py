@@ -77,7 +77,21 @@ def gen_weights(img_stack,position,buf):
     return w_1,w_2
 
 
-def merge(stackA,stackB,position,buf):
+def get_rept(array):
+    cords = np.nonzero(array)
+    rows = np.shape(array)[0]
+    cols = np.shape(array)[1]
+    stack = []
+    for i in range(rows):
+        nonzero_len = max(np.nonzero(array[i, :])[0]) - min(np.nonzero(array[i, :])[0]) + 1
+        stack.append(nonzero_len)
+
+    rept = stats.mode(stack)[0][0]
+    # rept = max(np.nonzero(array)[1]) - min(np.nonzero(array)[1]) + 1
+    return rept
+
+
+def merge(stackA, stackB, position, buf):
     # position 1: concat on 6 o'clock; 2: concat on 3 o'clock
     if np.shape(stackA) != np.shape(stackB):
         # not available for non-equal band stack
@@ -91,53 +105,233 @@ def merge(stackA,stackB,position,buf):
             col_B = np.shape(stackB)[2]
             row_max = max(row_A, row_B)
             col_max = max(col_A, col_B)
+            result = []
 
             if position == 1:
-                # pad the right first
-                # then pad the bottom
-                if col_A >= col_B:
-                  if row_B-buf < 1 or row_A-buf < 1:
+                if row_A - buf < 1 or row_B - buf < 1:
                     raise Exception("######Error!######")
-                  else:
-                    # for stackA
-                    ## no need to pad the right
-                    ## pad the bottom
-                    img_patchBOT = np.zeros(row_B-buf,col_A)
-                    # for stackB
-                    ## pad the right
-                    ## pad the top
-                    img_patchRGT = np.zeros(row_B,col_A-col_B)
-                    img_patchTOP = np.zeros(row_A-buf,col_A)
-
-                    for i in range(bands):
-                      stackA[i] = np.vstack((stackA[i],img_patchBOT))
-                      stackB[i] = np.hstack((stackB[i],img_patchRGT))
-                      stackB[i] = np.vstack((img_patchTOP,stackB[i]))
-                  
                 else:
-                  if row_B-buf < 1 or row_A-buf < 1:
-                    raise Exception("######Error!######")
-                  else:
-                    # for stackA
-                    ## pad the right
-                    ## pad the bottom
-                    img_patchRGT = np.zeros(row_A,col_B-col_A)
-                    img_patchBOT = np.zeros(row_B-buf,col_B)
-                    # for stackB
-                    ## no need to pad the right
-                    ## pad the top
-                    img_patchTOP = np.zeros(row_A-buf,col_B)
+                    if col_A > col_B:
+                        # for stackA
+                        ## no need to pad the right
+                        ## pad the bottom
+                        img_patchBOT = np.zeros((row_B - buf, col_A))
+                        # for stackB
+                        ## pad the right
+                        ## pad the top
+                        img_patchRGT = np.zeros((row_B, col_A - col_B))
+                        img_patchTOP = np.zeros((row_A - buf, col_A))
 
-                    for i in range(bands):
-                      stackA[i] = np.hstack((stackA[i], img_patchRGT))
-                      stackA[i] = np.vstack((stackA[i],img_patchBOT))
-                      stackB[i] = np.vstack((img_patchTOP,stackB[i]))
-                  
+                        for i in range(bands):
+                            # padding
+                            tmp_a = np.vstack((stackA[i], img_patchBOT))
+                            tmp_b = np.hstack((stackB[i], img_patchRGT))
+                            tmp_b = np.vstack((img_patchTOP, tmp_b))
+                            # stackA and B should have the same shape
+                            # generate weight
+                            core_b = np.cumsum(np.ones((1, buf))) * (1 / buf)
+                            core_a = 1 - core_b
+                            core_b = np.tile(core_b, (col_B, 1)).T
+                            core_a = np.tile(core_a, (col_B, 1)).T
+                            w_b = np.ones_like(tmp_a)
+                            w_b[row_A - buf:row_A, 0:col_B] = core_b
+                            w_a = np.ones_like(tmp_a)
+                            w_a[row_A - buf:row_A, 0:col_B] = core_a
+                            # calculate
+                            merged = (tmp_a * w_a).astype(rasterio.int16) + (tmp_b * w_b).astype(rasterio.int16)
+                            # merged = tmp_a * w_a + tmp_b * w_b
+                            # merged = merged.astype(rasterio.int16)
+                            if len(result) == 0:
+                                result = merged
+                            else:
+                                result = np.concatenate((result, merged), axis=0)
+                        # reshape it to multi band format
+                        result = np.reshape(result, (bands, row_A + row_B - buf, col_max))
+
+                    elif col_A == col_B:
+                        # for stackA
+                        ## no need to pad the right
+                        ## pad the bottom
+                        img_patchBOT = np.zeros((row_B - buf, col_A))
+                        # for stackB
+                        ## pad the top
+                        img_patchTOP = np.zeros((row_A - buf, col_A))
+
+                        for i in range(bands):
+                            tmp_a = np.vstack((stackA[i], img_patchBOT))
+                            tmp_b = np.vstack((img_patchTOP, stackB[i]))
+                            # stackA and B should have the same shape
+                            # generate weight
+                            core_b = np.cumsum(np.ones((1, buf))) * (1 / buf)
+                            core_a = 1 - core_b
+                            # rept_numa = max(np.nonzero(tmp_a)[1])-min(np.nonzero(tmp_a)[1])+1
+                            # rept_numb = max(np.nonzero(tmp_a)[1]) - min(np.nonzero(tmp_a)[1]) + 1
+                            # rept = min(rept_numa,rept_numb)
+                            rept_a = get_rept(tmp_a)
+                            rept_b = get_rept(tmp_b)
+                            rept = max(rept_a,rept_b)
+                            core_b = np.tile(core_b, (rept, 1)).T # rept col_B
+                            core_a = np.tile(core_a, (rept, 1)).T
+                            w_b = np.ones_like(tmp_a)
+                            w_b[row_A - buf:row_A, 0:col_B] = core_b
+                            w_a = np.ones_like(tmp_a)
+                            w_a[row_A - buf:row_A, 0:col_B] = core_a
+                            # calculate
+                            merged = (tmp_a * w_a).astype(rasterio.int16) + (tmp_b * w_b).astype(rasterio.int16)
+                            # merged = tmp_a * w_a + tmp_b * w_b
+                            # merged = merged.astype(rasterio.int16)
+                            if len(result) == 0:
+                                result = merged
+                            else:
+                                result = np.concatenate((result, merged), axis=0)
+                        # reshape it to multi band format
+                        result = np.reshape(result, (bands, row_A + row_B - buf, col_max))
+
+                    else:
+                        # for stackA
+                        ## pad the right
+                        ## pad the bottom
+                        img_patchRGT = np.zeros((row_A, col_B - col_A))
+                        img_patchBOT = np.zeros((row_B - buf, col_B))
+                        # for stackB
+                        ## no need to pad the right
+                        ## pad the top
+                        img_patchTOP = np.zeros((row_A - buf, col_B))
+
+                        for i in range(bands):
+                            tmp_a = np.hstack((stackA[i], img_patchRGT))
+                            tmp_a = np.vstack((tmp_a, img_patchBOT))
+                            tmp_b = np.vstack((img_patchTOP, stackB[i]))
+                            # stackA and B should have the same shape
+                            # generate weight
+                            core_b = np.cumsum(np.ones((1, buf))) * (1 / buf)
+                            core_a = 1 - core_b
+                            core_b = np.tile(core_b, (col_A, 1)).T
+                            core_a = np.tile(core_a, (col_A, 1)).T
+                            w_b = np.ones_like(tmp_a)
+                            w_b[row_A - buf:row_A, 0:col_A] = core_b
+                            w_a = np.ones_like(tmp_a)
+                            w_a[row_A - buf:row_A, 0:col_A] = core_a
+                            # calculate
+                            print('```````Caltulating```````')
+                            merged = (tmp_a * w_a).astype(rasterio.int16) + (tmp_b * w_b).astype(rasterio.int16)
+                            # merged = tmp_a * w_a + tmp_b * w_b
+                            # merged = merged.astype(rasterio.int16)
+                            if len(result) == 0:
+                                result = merged
+                            else:
+                                result = np.concatenate((result, merged), axis=0)
+                        # reshape it to multi band format
+                        result = np.reshape(result, (bands, row_A + row_B - buf, col_max))
 
             elif position == 2:
-              # 
+                if col_A - buf < 1 or col_B - buf < 1:
+                    raise Exception("######Error!######")
+                else:
+                    if row_A > row_B:
+                        # for stackA
+                        ## no need to pad the bottom
+                        ## pad the right
+                        img_patchRGT = np.zeros((row_A, col_B - buf))
+                        # for stackB
+                        ## pad the bottom
+                        ## pad the left
+                        img_patchBOT = np.zeros((row_A - row_B, col_B))
+                        img_patchLFT = np.zeros((row_A, col_A - buf))
 
+                        for i in range(bands):
+                            tmp_a = np.hstack((stackA[i], img_patchRGT))
+                            tmp_b = np.vstack((stackB[i], img_patchBOT))
+                            tmp_b = np.hstack((img_patchLFT, tmp_b))
+                            # stackA and B should have the same shape
+                            # generate weight
+                            core_b = np.cumsum(np.ones((1, buf))) * (1 / buf)
+                            core_a = 1 - core_b
+                            core_b = np.tile(core_b, (row_B, 1))
+                            core_a = np.tile(core_a, (row_B, 1))
+                            w_b = np.ones_like(tmp_a)
+                            w_b[0:row_B, col_A-buf:col_A] = core_b
+                            w_a = np.ones_like(tmp_a)
+                            w_a[0:row_B, col_A-buf:col_A] = core_a
+                            # calculate
+                            merged = (tmp_a * w_a).astype(rasterio.int16) + (tmp_b * w_b).astype(rasterio.int16)
+                            # merged = tmp_a * w_a + tmp_b * w_b
+                            # merged = merged.astype(rasterio.int16)
+                            if len(result) == 0:
+                                result = merged
+                            else:
+                                result = np.concatenate((result, merged), axis=0)
+                        # reshape it to multi band format
+                        result = np.reshape(result, (bands, row_max, col_A + col_B - buf))
 
+                    elif row_A == row_B:
+                        # for stackA
+                        ## no need to pad the bottom
+                        ## pad the right
+                        img_patchRGT = np.zeros((row_A, col_B - buf))
+                        # for stackB
+                        ## no need to pad the pad the bottom
+                        ## pad the left
+                        img_patchLFT = np.zeros((row_A, col_A - buf))
+
+                        for i in range(bands):
+                            tmp_a = np.hstack((stackA[i], img_patchRGT))
+                            tmp_b = np.hstack((img_patchLFT, stackB[i]))
+                            # stackA and B should have the same shape
+                            # generate weight
+                            core_b = np.cumsum(np.ones((1, buf))) * (1 / buf)
+                            core_a = 1 - core_b
+                            core_b = np.tile(core_b, (row_B, 1))
+                            core_a = np.tile(core_a, (row_B, 1))
+                            w_b = np.ones_like(tmp_a)
+                            w_b[0:row_B, col_A - buf:col_A] = core_b
+                            w_a = np.ones_like(tmp_a)
+                            w_a[0:row_B, col_A - buf:col_A ] = core_a
+                            # calculate
+                            merged = (tmp_a * w_a).astype(rasterio.int16) + (tmp_b * w_b).astype(rasterio.int16)
+                            # merged = tmp_a * w_a + tmp_b * w_b
+                            # merged = merged.astype(rasterio.int16)
+                            if len(result) == 0:
+                                result = merged
+                            else:
+                                result = np.concatenate((result, merged), axis=0)
+                        # reshape it to multi band format
+                        result = np.reshape(result, (bands, row_max, col_A + col_B - buf))
+                    else:
+                        # for stackA
+                        ## pad the bottom
+                        ## pad the right
+                        img_patchBOT = np.zeros((row_B - row_A, col_A))
+                        img_patchRGT = np.zeros((row_B, col_B - buf))
+                        # for stackB
+                        ## no need to pad the pad the bottom
+                        ## pad the left
+                        img_patchLFT = np.zeros((row_B, col_A - buf))
+
+                        for i in range(bands):
+                            tmp_a = np.vstack((stackA[i], img_patchBOT))
+                            tmp_a = np.hstack((tmp_a, img_patchRGT))
+                            tmp_b = np.hstack((img_patchLFT, stackB[i]))
+                            # stackA and B should have the same shape
+                            # generate weight
+                            core_b = np.cumsum(np.ones((1, buf))) * (1 / buf)
+                            core_a = 1 - core_b
+                            core_b = np.tile(core_b, (row_A, 1))
+                            core_a = np.tile(core_a, (row_A, 1))
+                            w_b = np.ones_like(tmp_a)
+                            w_b[0:row_A, col_A-buf:col_A] = core_b
+                            w_a = np.ones_like(tmp_a)
+                            w_a[0:row_A, col_A-buf:col_A] = core_a
+                            # calculate
+                            merged = (tmp_a * w_a).astype(rasterio.int16) + (tmp_b * w_b).astype(rasterio.int16)
+                            # merged = tmp_a * w_a + tmp_b * w_b
+                            # merged = merged.astype(rasterio.int16)
+                            if len(result) == 0:
+                                result = merged
+                            else:
+                                result = np.concatenate((result, merged), axis=0)
+                        # reshape it to multi band format
+                        result = np.reshape(result, (bands, row_max, col_A + col_B - buf))
 
     else:
         bands = np.shape(stackA)[0]
@@ -150,11 +344,11 @@ def merge(stackA,stackB,position,buf):
         # merge imgs
         if position == 1:
             # attach zero patch to img to fit the size of merged
-            img_patch = np.zeros((row-buf, col))
+            img_patch = np.zeros((row - buf, col))
             for i in range(bands):
                 tmp_a = np.vstack((stackA[i], img_patch))
                 tmp_b = np.vstack((img_patch, stackB[i]))
-                merged = tmp_a*w_a + tmp_b*w_b
+                merged = tmp_a * w_a + tmp_b * w_b
                 merged = merged.astype(rasterio.int16)
                 if len(result) == 0:
                     result = merged
@@ -163,18 +357,18 @@ def merge(stackA,stackB,position,buf):
             # reshape it to multi band format
             result = np.reshape(result, (bands, 2 * row - buf, col))
         elif position == 2:
-            img_patch = np.zeros((row, col-buf))
+            img_patch = np.zeros((row, col - buf))
             for i in range(bands):
                 tmp_a = np.hstack((stackA[i], img_patch))
                 tmp_b = np.hstack((img_patch, stackB[i]))
                 merged = tmp_a * w_a + tmp_b * w_b
+                merged = merged.astype(rasterio.int16)
                 if len(result) == 0:
                     result = merged
                 else:
                     result = np.concatenate((result, merged), axis=0)
             # reshape
-            result = result.astype(rasterio.int16)
-            result = np.reshape(result,(bands, row, 2*col-buf))
+            result = np.reshape(result, (bands, row, 2 * col - buf))
 
     return result
 
